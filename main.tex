@@ -1,0 +1,261 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{setspace}
+
+\onehalfspacing
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\title{A Mathematical Report on a Pseudo-Spectral Simulation of the Two-Dimensional Navier--Stokes Equations}
+\author{Lee Cheuk Man Gerard}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report studies the simulation mode of a Python program for the numerical visualization of incompressible fluid motion governed by the two-dimensional Navier--Stokes equations. The method is formulated in vorticity--streamfunction form and discretized using a Fourier pseudo-spectral approach on a doubly periodic domain. The report derives the governing equations, explains the spectral representation of the solution, discusses the treatment of nonlinear advection and aliasing, and outlines the numerical time-stepping procedure. The generated animated GIF and poster image serve as post-processing outputs that visualize the evolution of the vorticity field.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+Fluid dynamics provides a fundamental mathematical description of the motion of liquids and gases. Among the most classical models is the incompressible Navier--Stokes system, which balances inertia, pressure, and viscous diffusion. In two spatial dimensions, the dynamics can be rewritten in terms of the scalar vorticity, leading to a particularly elegant and computationally efficient formulation.
+
+The Python script considered in this report implements the \emph{simulation mode} only. It numerically evolves a two-dimensional incompressible vorticity field and produces visual outputs, including an animated GIF and a static poster image. The emphasis here is on the underlying mathematics and numerical methodology rather than on data-driven visualization.
+
+\section{Governing Equations of Incompressible Flow}
+
+Let $\Omega \subset \mathbb{R}^2$ be a periodic domain, typically taken as a rectangle
+\[
+\Omega = [0,L_x]\times [0,L_y].
+\]
+The velocity field is denoted by
+\[
+\mathbf{u}(x,y,t) = \bigl(u(x,y,t),v(x,y,t)\bigr),
+\]
+and the pressure by $p(x,y,t)$. For an incompressible Newtonian fluid of constant density and kinematic viscosity $\nu>0$, the Navier--Stokes equations are
+\begin{align}
+\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u}\cdot\nabla)\mathbf{u} &= -\nabla p + \nu \Delta \mathbf{u}, \label{eq:NS}\\
+\nabla\cdot \mathbf{u} &= 0. \label{eq:incompressible}
+\end{align}
+
+Equation \eqref{eq:NS} expresses conservation of momentum, while \eqref{eq:incompressible} enforces volume preservation.
+
+\subsection{Vorticity Formulation}
+
+In two dimensions, the scalar vorticity is defined by
+\[
+\omega = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}.
+\]
+Taking the curl of \eqref{eq:NS} eliminates the pressure term and yields the vorticity equation
+\begin{equation}
+\frac{\partial \omega}{\partial t} + \mathbf{u}\cdot\nabla \omega = \nu \Delta \omega.
+\label{eq:vorticity}
+\end{equation}
+The nonlinear transport term may be written using the Jacobian
+\[
+J(\psi,\omega) = \frac{\partial \psi}{\partial x}\frac{\partial \omega}{\partial y}
+- \frac{\partial \psi}{\partial y}\frac{\partial \omega}{\partial x}.
+\]
+If $\psi(x,y,t)$ is the streamfunction defined by
+\[
+u = \frac{\partial \psi}{\partial y}, \qquad v = -\frac{\partial \psi}{\partial x},
+\]
+then incompressibility is automatically satisfied and
+\[
+\omega = -\Delta \psi.
+\]
+Hence \eqref{eq:vorticity} can be written in the compact form
+\begin{equation}
+\frac{\partial \omega}{\partial t} + J(\psi,\omega) = \nu \Delta \omega.
+\label{eq:vorticity_jacobian}
+\end{equation}
+
+\section{Pseudo-Spectral Discretization}
+
+\subsection{Fourier Representation}
+
+Because the computational domain is periodic, it is natural to expand the fields in Fourier series. For example,
+\[
+\omega(x,y,t) = \sum_{k_x,k_y} \widehat{\omega}_{k_x,k_y}(t)
+\,e^{i(k_x x + k_y y)},
+\]
+where the wave numbers are determined by the domain lengths:
+\[
+k_x = \frac{2\pi m}{L_x}, \qquad k_y = \frac{2\pi n}{L_y},
+\]
+for integers $m,n$ in the truncated spectral set.
+
+In Fourier space, differentiation becomes multiplication:
+\[
+\widehat{\frac{\partial \omega}{\partial x}} = i k_x \widehat{\omega}, 
+\qquad
+\widehat{\frac{\partial \omega}{\partial y}} = i k_y \widehat{\omega},
+\qquad
+\widehat{\Delta \omega} = -(k_x^2+k_y^2)\widehat{\omega}.
+\]
+Therefore, the Laplacian is diagonal in spectral space, which makes the pseudo-spectral approach highly efficient for smooth periodic problems \cite{canuto2006, boyd2001}.
+
+\subsection{Poisson Solve for the Streamfunction}
+
+From
+\[
+-\Delta \psi = \omega,
+\]
+the streamfunction in Fourier space satisfies
+\[
+(k_x^2 + k_y^2)\widehat{\psi} = \widehat{\omega},
+\]
+so that, for nonzero wave numbers,
+\[
+\widehat{\psi}(k_x,k_y) = \frac{\widehat{\omega}(k_x,k_y)}{k_x^2+k_y^2}.
+\]
+The zero mode is set to zero, since $\psi$ is determined only up to an additive constant.
+
+Once $\widehat{\psi}$ is known, the velocity components are recovered spectrally:
+\[
+\widehat{u} = i k_y \widehat{\psi}, \qquad
+\widehat{v} = -i k_x \widehat{\psi}.
+\]
+This step reconstructs the divergence-free velocity field exactly on the resolved modes.
+
+\subsection{Treatment of the Nonlinear Term}
+
+The advective term $J(\psi,\omega)$ is quadratic in the unknown fields. In spectral form, quadratic products correspond to convolutions, which are expensive to evaluate directly. The pseudo-spectral method avoids this by computing nonlinear products in physical space and then transforming the result back to Fourier space.
+
+A typical evaluation procedure is:
+\begin{enumerate}[label=\arabic*.]
+    \item Transform $\widehat{\omega}$ to physical space to obtain $\omega$.
+    \item Solve for $\widehat{\psi}$ using the Poisson relation.
+    \item Compute $u$ and $v$ from $\psi$.
+    \item Form the Jacobian $J(\psi,\omega)$ in physical space.
+    \item Transform the nonlinear term back to spectral space.
+\end{enumerate}
+
+Because discrete Fourier products can generate aliasing errors, a standard de-aliasing strategy is the $2/3$ rule: high-frequency modes beyond two-thirds of the maximum resolvable wave number are removed after nonlinear multiplication \cite{canuto2006, boyd2001}. This improves numerical stability and prevents spurious energy transfer to unresolved modes.
+
+\section{Temporal Discretization}
+
+After spatial discretization, the vorticity equation becomes a system of ordinary differential equations in time:
+\[
+\frac{d \widehat{\omega}}{dt}
+=
+\widehat{-J(\psi,\omega) + \nu \Delta \omega}.
+\]
+The Python script advances this system using an explicit time-stepping procedure. In general, the update may be written abstractly as
+\[
+\omega^{n+1} = \mathcal{T}_{\Delta t}(\omega^n),
+\]
+where $\mathcal{T}_{\Delta t}$ denotes the numerical time integrator.
+
+For explicit methods, stability is constrained by a CFL-type condition. A typical restriction has the form
+\[
+\Delta t \le C_{\mathrm{CFL}}
+\min\left(
+\frac{\Delta x}{\|u\|_\infty},
+\frac{\Delta y}{\|v\|_\infty},
+\frac{\Delta x^2}{\nu},
+\frac{\Delta y^2}{\nu}
+\right),
+\]
+where $C_{\mathrm{CFL}}$ is a method-dependent constant. This reflects both the advective and diffusive time scales.
+
+\section{Energy and Enstrophy}
+
+Two central quadratic quantities in two-dimensional fluid dynamics are the kinetic energy and the enstrophy:
+\[
+E(t) = \frac{1}{2}\int_{\Omega} |\mathbf{u}(x,y,t)|^2 \, dA,
+\qquad
+\mathcal{Z}(t) = \frac{1}{2}\int_{\Omega} \omega(x,y,t)^2 \, dA.
+\]
+For the unforced viscous system on a periodic domain, one obtains the dissipation relations
+\[
+\frac{dE}{dt} = -\nu \int_{\Omega} |\nabla \mathbf{u}|^2\, dA \le 0,
+\qquad
+\frac{d\mathcal{Z}}{dt} = -\nu \int_{\Omega} |\nabla \omega|^2\, dA \le 0.
+\]
+Thus viscosity causes both energy and enstrophy to decay monotonically. In the inviscid limit $\nu \to 0$, these quantities are conserved in the idealized Euler system. These conservation and dissipation laws are among the most important mathematical features of fluid mechanics \cite{chorin1993, batchelor1967}.
+
+\section{Algorithmic Summary of the Script}
+
+The simulation mode of the script may be summarized as follows:
+\begin{enumerate}[label=\arabic*.]
+    \item Prescribe an initial vorticity field $\omega(x,y,0)=\omega_0(x,y)$.
+    \item Represent $\omega$ on a Fourier grid over a periodic domain.
+    \item At each time step, solve $-\Delta \psi = \omega$ in spectral space.
+    \item Recover the velocity field from the streamfunction.
+    \item Evaluate the nonlinear Jacobian $J(\psi,\omega)$ in physical space.
+    \item Advance the vorticity using an explicit time integrator.
+    \item Store selected frames for animation and save the final visualization.
+\end{enumerate}
+
+This workflow is characteristic of pseudo-spectral solvers for smooth periodic incompressible flows \cite{temam2001}.
+
+\section{Visualization and Post-Processing}
+
+The script produces two main outputs:
+\begin{itemize}
+    \item an animated GIF showing the temporal evolution of the vorticity field;
+    \item a poster-style PNG image summarizing the simulation output.
+\end{itemize}
+
+The static image can be inserted directly into the report. In Overleaf, upload the file named \texttt{navier\_stokes\_vorticity\_poster.png} to the project directory and include it as shown below.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\linewidth]{navier_stokes_vorticity_poster.png}
+    \caption{Poster image generated by the pseudo-spectral Navier--Stokes vorticity simulation. The figure visualizes the computed vorticity field $\omega(x,y,t)$ at a selected time and provides a static summary of the evolving flow structure.}
+    \label{fig:poster}
+\end{figure}
+
+The GIF is a complementary output that captures the time-dependent dynamics more completely than the still image, while the poster image is better suited for inclusion in a formal written report.
+
+\section{Conclusion}
+
+The Python script implements a mathematically elegant and computationally efficient model for two-dimensional incompressible fluid flow. By reformulating the Navier--Stokes equations in vorticity--streamfunction form, the simulation avoids direct pressure computation and leverages the diagonal structure of the Laplacian in Fourier space. The pseudo-spectral method provides high accuracy for smooth periodic solutions, while de-aliasing and time-step control are essential for stable computation. The resulting GIF and poster image serve as clear visual representations of the flow evolution.
+
+\begin{thebibliography}{99}
+
+\bibitem{batchelor1967}
+G. K. Batchelor,
+\textit{An Introduction to Fluid Dynamics},
+Cambridge University Press, 1967.
+
+\bibitem{chorin1993}
+A. J. Chorin and J. E. Marsden,
+\textit{A Mathematical Introduction to Fluid Mechanics},
+3rd ed., Springer, 1993.
+
+\bibitem{canuto2006}
+C. Canuto, M. Y. Hussaini, A. Quarteroni, and T. A. Zang,
+\textit{Spectral Methods: Fundamentals in Single Domains},
+Springer, 2006.
+
+\bibitem{boyd2001}
+J. P. Boyd,
+\textit{Chebyshev and Fourier Spectral Methods},
+2nd ed., Dover Publications, 2001.
+
+\bibitem{temam2001}
+R. Temam,
+\textit{Navier--Stokes Equations: Theory and Numerical Analysis},
+AMS Chelsea Publishing, 2001.
+
+\end{thebibliography}
+
+\end{document}
